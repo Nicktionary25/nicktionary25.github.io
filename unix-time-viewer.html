@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Unix Time Viewer</title>
+<style>
+  :root {
+    --bg: #0a0e17;
+    --bg2: #111827;
+    --panel: rgba(23, 31, 48, 0.65);
+    --panel-border: rgba(88, 120, 180, 0.25);
+    --accent: #4fd1c5;
+    --accent2: #63b3ed;
+    --accent3: #f6ad55;
+    --danger: #fc8181;
+    --text: #e2e8f0;
+    --muted: #8ea0b8;
+    --grid: rgba(88, 120, 180, 0.08);
+    --mono: 'SF Mono', 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: var(--sans);
+    background: radial-gradient(ellipse at top, #132038 0%, var(--bg) 55%, #05070c 100%);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 24px;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* animated star grid background */
+  body::before {
+    content: "";
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(ellipse at center, black 20%, transparent 80%);
+    pointer-events: none;
+    z-index: 0;
+  }
+  .wrap { position: relative; z-index: 1; max-width: 1180px; margin: 0 auto; }
+
+  header {
+    display: flex; align-items: baseline; justify-content: space-between;
+    flex-wrap: wrap; gap: 12px; margin-bottom: 22px;
+  }
+  h1 { font-size: 20px; font-weight: 700; letter-spacing: 0.5px; }
+  h1 .epoch { color: var(--accent); }
+  .subtitle { color: var(--muted); font-size: 13px; }
+
+  /* Hero epoch counter */
+  .hero {
+    background: linear-gradient(135deg, rgba(79,209,197,0.08), rgba(99,179,237,0.05));
+    border: 1px solid var(--panel-border);
+    border-radius: 20px;
+    padding: 34px 30px 28px;
+    text-align: center;
+    position: relative;
+    overflow: hidden;
+    margin-bottom: 22px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+  }
+  .hero::after {
+    content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2), var(--accent3));
+  }
+  .hero .label {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 3px;
+    color: var(--muted); margin-bottom: 10px;
+  }
+  .epoch-seconds {
+    font-family: var(--mono);
+    font-size: clamp(38px, 9vw, 86px);
+    font-weight: 800;
+    line-height: 1.05;
+    letter-spacing: -2px;
+    font-variant-numeric: tabular-nums;
+    background: linear-gradient(180deg, #ffffff, var(--accent));
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+    word-break: break-all;
+  }
+  .epoch-seconds .tick { animation: flash 1s steps(1) infinite; }
+  @keyframes flash { 50% { opacity: 0.55; } }
+  .ms-row {
+    margin-top: 8px; font-family: var(--mono); font-size: 15px;
+    color: var(--muted); letter-spacing: 1px;
+  }
+  .ms-row b { color: var(--accent2); font-weight: 600; }
+  .fraction {
+    display:inline-block; margin-left:6px; font-size:13px; color:var(--accent3);
+  }
+
+  /* Controls */
+  .controls {
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+    margin-bottom: 20px;
+  }
+  .btn {
+    font-family: var(--sans); font-size: 13px; font-weight: 600;
+    padding: 9px 16px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--panel-border); background: var(--panel);
+    color: var(--text); transition: 0.15s; backdrop-filter: blur(6px);
+  }
+  .btn:hover { border-color: var(--accent); background: rgba(79,209,197,0.12); }
+  .btn.active { background: var(--accent); color: #04121a; border-color: var(--accent); }
+  .spacer { flex: 1; }
+  .mode-toggle { display:flex; gap:0; }
+  .mode-toggle .btn { border-radius: 0; }
+  .mode-toggle .btn:first-child { border-radius: 10px 0 0 10px; }
+  .mode-toggle .btn:last-child { border-radius: 0 10px 10px 0; border-left: none; }
+
+  /* Grid layout */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 18px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--panel-border);
+    border-radius: 16px;
+    padding: 20px 22px;
+    backdrop-filter: blur(10px);
+  }
+  .card h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 2px;
+    color: var(--muted); margin-bottom: 14px; font-weight: 700;
+    display:flex; align-items:center; gap:8px;
+  }
+  .card h2 .dot { width:8px; height:8px; border-radius:50%; background:var(--accent); }
+
+  .kv { display:flex; justify-content: space-between; align-items: center;
+         padding: 9px 0; border-bottom: 1px dashed rgba(142,160,184,0.15);
+         gap: 12px; }
+  .kv:last-child { border-bottom: none; }
+  .kv .k { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .kv .v { font-family: var(--mono); font-size: 14px; font-weight: 600;
+           text-align: right; word-break: break-all; }
+  .kv .v.sm { font-size: 12px; color: var(--text); }
+
+  /* Progress bar to next milestone */
+  .milestone { margin-top: 4px; }
+  .milestone .top { display:flex; justify-content: space-between; font-size: 13px; margin-bottom: 8px; }
+  .milestone .top .name { color: var(--accent3); font-weight: 600; }
+  .milestone .top .pct { color: var(--muted); font-family: var(--mono); }
+  .bar { height: 12px; background: rgba(255,255,255,0.06); border-radius: 20px; overflow: hidden; position: relative; }
+  .bar .fill {
+    height: 100%; border-radius: 20px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+    transition: width 0.4s linear; position: relative;
+  }
+  .bar .fill::after {
+    content: ""; position: absolute; right: 0; top: 0; bottom: 0; width: 20px;
+    background: rgba(255,255,255,0.5); filter: blur(4px);
+  }
+  .milestone .nextval { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 7px; }
+
+  /* Countdown tiles */
+  .count-grid { display:grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .ctile {
+    background: rgba(255,255,255,0.03); border:1px solid rgba(142,160,184,0.12);
+    border-radius: 12px; padding: 12px 8px; text-align: center;
+  }
+  .ctile .num { font-family: var(--mono); font-size: 22px; font-weight: 800; color: var(--accent); }
+  .ctile .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--muted); margin-top: 4px; }
+
+  /* Big-breakdown row */
+  .big-num { font-family: var(--mono); font-size: 26px; font-weight: 700; color: var(--accent2); }
+  .big-lbl { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing:1px; }
+
+  /* Input for manual conversion */
+  .convert { display:flex; gap: 8px; margin-bottom: 12px; }
+  .convert input {
+    flex:1; font-family: var(--mono); font-size: 14px; padding: 10px 12px;
+    border-radius: 10px; border: 1px solid var(--panel-border);
+    background: rgba(0,0,0,0.3); color: var(--text);
+  }
+  .convert input:focus { outline: none; border-color: var(--accent); }
+  .convert button { padding: 10px 18px; }
+
+  .tag { display:inline-block; font-size:11px; padding:2px 8px; border-radius:20px;
+         background: rgba(79,209,197,0.15); color: var(--accent); margin-left:6px; }
+  .muted { color: var(--muted); }
+  footer { text-align:center; color: var(--muted); font-size: 12px; margin-top: 26px; }
+  .paused-flag { color: var(--danger); font-weight:700; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>UNIX TIME <span class="epoch">VIEWER</span></h1>
+      <div class="subtitle">Seconds elapsed since 00:00:00 UTC, Thursday 1 January 1970</div>
+    </div>
+    <div class="subtitle" id="tzLabel">timezone: —</div>
+  </header>
+
+  <div class="controls">
+    <div class="mode-toggle">
+      <button class="btn active" data-mode="run" id="btnRun">▶ Running</button>
+      <button class="btn" data-mode="pause" id="btnPause">❚❚ Paused</button>
+    </div>
+    <button class="btn" id="btnMs" title="Show milliseconds & microseconds">Units: seconds</button>
+    <button class="btn" id="btnComma" title="Toggle thousands separators">Formatting: digits</button>
+    <button class="btn" id="btnReset">↺ Reset clock</button>
+    <div class="spacer"></div>
+    <div class="subtitle" id="utcLabel"></div>
+  </div>
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="label">Unix Epoch Time</div>
+    <div class="epoch-seconds" id="epochSec">0</div>
+    <div class="ms-row"><b id="nowLocal">—</b> <span class="fraction" id="fraction"></span></div>
+  </div>
+
+  <!-- GRID -->
+  <div class="grid">
+
+    <!-- CONVERSION -->
+    <div class="card">
+      <h2><span class="dot"></span>Convert an Epoch Value</h2>
+      <div class="convert">
+        <input type="number" id="convInput" placeholder="e.g. 1700000000" value="1700000000">
+        <button class="btn" id="convBtn">Go</button>
+      </div>
+      <div class="kv"><span class="k">Epoch (seconds)</span><span class="v" id="cSec">—</span></div>
+      <div class="kv"><span class="k">Epoch (milliseconds)</span><span class="v" id="cMs">—</span></div>
+      <div class="kv"><span class="k">UTC date &amp; time</span><span class="v sm" id="cUtc">—</span></div>
+      <div class="kv"><span class="k">Local date &amp; time</span><span class="v sm" id="cLoc">—</span></div>
+      <div class="kv"><span class="k">ISO 8601</span><span class="v sm" id="cIso">—</span></div>
+      <div class="kv"><span class="k">Day of week</span><span class="v sm" id="cDow">—</span></div>
+    </div>
+
+    <!-- HUMAN BREAKDOWN -->
+    <div class="card">
+      <h2><span class="dot"></span>Time Since Epoch (human)</h2>
+      <div class="count-grid" id="countGrid"></div>
+      <div style="margin-top:16px;">
+        <div class="kv"><span class="k">Total days</span><span class="v" id="bDays">—</span></div>
+        <div class="kv"><span class="k">Total hours</span><span class="v" id="bHours">—</span></div>
+        <div class="kv"><span class="k">Total minutes</span><span class="v" id="bMinutes">—</span></div>
+        <div class="kv"><span class="k">Total seconds</span><span class="v" id="bSeconds">—</span></div>
+        <div class="kv"><span class="k">Weeks</span><span class="v" id="bWeeks">—</span></div>
+      </div>
+    </div>
+
+    <!-- MILESTONES -->
+    <div class="card">
+      <h2><span class="dot"></span>Progress to Next Milestone</h2>
+      <div class="milestone">
+        <div class="top">
+          <span class="name" id="msName">—</span>
+          <span class="pct" id="msPct">0%</span>
+        </div>
+        <div class="bar"><div class="fill" id="msFill" style="width:0%"></div></div>
+        <div class="nextval" id="msNext">—</div>
+      </div>
+      <div id="milestoneList" style="margin-top:16px;"></div>
+    </div>
+
+    <!-- SCALE CONTEXT -->
+    <div class="card">
+      <h2><span class="dot"></span>Scale Context</h2>
+      <div class="kv"><span class="k">Since midnight UTC today</span><span class="v" id="sinceMid">—</span></div>
+      <div class="kv"><span class="k">% through the day</span><span class="v" id="pctDay">—</span></div>
+      <div class="kv"><span class="k">Unix time / second</span><span class="v" id="secOfYear">—</span></div>
+      <div class="kv"><span class="k">Age of Unix era (y)</span><span class="v" id="ageUnix">—</span></div>
+      <div class="kv"><span class="k">Year (UTC)</span><span class="v" id="yearUtc">—</span></div>
+      <div class="kv"><span class="k">Unix seconds per hour</span><span class="v sm">3,600</span></div>
+    </div>
+
+    <!-- BINARY / HEX -->
+    <div class="card">
+      <h2><span class="dot"></span>Number Bases <span class="tag">raw</span></h2>
+      <div class="kv"><span class="k">Decimal</span><span class="v" id="nDec">—</span></div>
+      <div class="kv"><span class="k">Binary</span><span class="v sm" id="nBin">—</span></div>
+      <div class="kv"><span class="k">Octal</span><span class="v" id="nOct">—</span></div>
+      <div class="kv"><span class="k">Hexadecimal</span><span class="v" id="nHex">—</span></div>
+      <div class="kv"><span class="k">Base 36</span><span class="v" id="n36">—</span></div>
+    </div>
+
+    <!-- FUN FACTS -->
+    <div class="card">
+      <h2><span class="dot"></span>Epoch Facts</h2>
+      <div class="kv"><span class="k">Leap seconds added</span><span class="v sm">27</span></div>
+      <div class="kv"><span class="k">Seconds until Y2K38</span><span class="v" id="y2k38">—</span></div>
+      <div class="kv"><span class="k">Y2K38 date (UTC)</span><span class="v sm" id="y2k38date">2038-01-19 03:14:08</span></div>
+      <div class="kv"><span class="k">Leap year now?</span><span class="v sm" id="isLeap">—</span></div>
+      <div class="kv"><span class="k">Unix day number</span><span class="v" id="dayNum">—</span></div>
+    </div>
+
+  </div>
+
+  <footer>
+    Live from your system clock · updates every 60 ms · displayed in <b id="tzLabel2">UTC</b>
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---- State ----
+  const EPOCH = 0;
+  let mode = "run";            // 'run' | 'pause'
+  let pausedAt = 0;            // paused wall-clock ms
+  let userOffset = 0;          // manual offset from "reset clock"
+  let showMsUnits = false;
+  let useComma = false;
+
+  // ---- Elements ----
+  const $ = id => document.getElementById(id);
+  const epochSecEl = $('epochSec');
+  let lastSecond = -1;
+
+  // ---- Helpers ----
+  function fmt(n){
+    if (useComma) return Math.trunc(n).toLocaleString('en-US');
+    return Math.trunc(n).toString();
+  }
+  function fmtFull(n){
+    return useComma ? n.toLocaleString('en-US') : n.toString();
+  }
+
+  function nowMs(){
+    const t = Date.now() + userOffset;
+    return t - EPOCH * 1000;   // ms since epoch
+  }
+
+  function pad(n, l){ return n.toString().padStart(l, '0'); }
+
+  function utcParts(ms){
+    const d = new Date(ms);
+    return {
+      y: d.getUTCFullYear(),
+      mo: d.getUTCMonth()+1,
+      da: d.getUTCDate(),
+      h: d.getUTCHours(),
+      mi: d.getUTCMinutes(),
+      s: d.getUTCSeconds(),
+      dow: d.getUTCDay()
+    };
+  }
+
+  const DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const MON = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  // ---- Milestones (next round numbers in seconds) ----
+  const MILESTONES = [
+    1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13
+  ];
+  function nextMilestone(sec){
+    for (const m of MILESTONES){ if (sec < m) return m; }
+    return 2e13;
+  }
+
+  // ---- Main tick ----
+  function tick(){
+    let msSinceEpoch;
+    if (mode === "run"){
+      msSinceEpoch = nowMs();
+    } else {
+      msSinceEpoch = pausedAt;
+    }
+    let secFloat = msSinceEpoch / 1000;
+    let sec = Math.floor(secFloat);
+    let fracMs = Math.round((secFloat - sec) * 1000);
+
+    // Hero
+    epochSecEl.innerHTML = fmt(sec);
+    // blink colon-less last digit subtle tick on whole seconds
+    if (sec !== lastSecond){
+      lastSecond = sec;
+    }
+
+    // Local now + fraction
+    const wallMs = msSinceEpoch + EPOCH*1000;
+    $('nowLocal').textContent = new Date(wallMs).toLocaleString();
+    $('fraction').textContent =
+      "· " + pad(fracMs,3) + " ms into this second";
+
+    // ---- Human breakdown ----
+    const days = Math.floor(sec / 86400);
+    const rem1 = sec % 86400;
+    const hh = Math.floor(rem1 / 3600);
+    const mm = Math.floor((rem1 % 3600) / 60);
+    const ss = rem1 % 60;
+    const weeks = Math.floor(days / 7);
+
+    $('countGrid').innerHTML =
+      ctile(days,'Days')+ctile(hh,'Hours')+ctile(mm,'Minutes')+
+      ctile(ss,'Seconds')+ctile(weeks,'Weeks')+ctile(sec%86400<10?sec:'','Clock');
+    $('bDays').textContent = fmt(days);
+    $('bHours').textContent = fmt(sec/3600);
+    $('bMinutes').textContent = fmt(sec/60);
+    $('bSeconds').textContent = fmt(sec);
+    $('bWeeks').textContent = fmt(weeks);
+
+    // ---- Milestone ----
+    const msNextVal = nextMilestone(sec);
+    const prevVal = msNextVal === 1e6 ? 0 : (MILESTONES.filter(m=>m<msNextVal).pop()||0);
+    const pct = Math.min(100, ((sec - prevVal)/(msNextVal - prevVal))*100);
+    $('msName').textContent = "→ " + fmtFull(msNextVal) + " s";
+    $('msPct').textContent = pct.toFixed(4) + "%";
+    $('msFill').style.width = pct.toFixed(2) + "%";
+    const sToNext = msNextVal - sec;
+    $('msNext').textContent =
+      fmt(sToNext) + " s to go · " +
+      Math.floor(sToNext/86400) + "d " + Math.floor((sToNext%86400)/3600) + "h " +
+      Math.floor((sToNext%3600)/60) + "m " + (sToNext%60) + "s";
+
+    // milestone list (a few interesting ones)
+    let list = '';
+    const interesting = MILESTONES.concat([1356998400, 1893456000]);
+    interesting.forEach(m => {
+      if (sec < m && m <= msNextVal){
+        const d = new Date(m*1000);
+        const rel = Math.round((m-sec));
+        list += `<div class="kv"><span class="k">${fmtFull(m)} s</span>
+                 <span class="v sm">${d.toISOString().slice(0,10)} · ${rel}s away</span></div>`;
+      }
+    });
+    $('milestoneList').innerHTML = list;
+
+    // ---- Scale context ----
+    const p = utcParts(wallMs);
+    const secOfDay = p.h*3600 + p.mi*60 + p.s;
+    $('sinceMid').textContent = pad(p.h,2)+':'+pad(p.mi,2)+':'+pad(p.s,2);
+    $('pctDay').textContent = ((secOfDay/86400)*100).toFixed(6) + "%";
+    const yearStart = Date.UTC(p.y,0,1)/1000;
+    const yearEnd = Date.UTC(p.y,11,31,23,59,59)/1000 + 1;
+    $('secOfYear').textContent = ((sec - yearStart)/(yearEnd-yearStart)*100).toFixed(6) + "%";
+    $('ageUnix').textContent = secFloat.toFixed(1);
+    $('yearUtc').textContent = p.y + (p.mo<10?'':'');
+    $('dayNum').textContent = days;
+
+    // ---- Number bases ----
+    const big = BigInt(sec);
+    $('nDec').textContent = sec.toString();
+    $('nBin').textContent = big.toString(2);
+    $('nOct').textContent = big.toString(8);
+    $('nHex').textContent = big.toString(16).toUpperCase();
+    $('n36').textContent = big.toString(36).toUpperCase();
+
+    // ---- Fun facts ----
+    $('y2k38').textContent = fmt(2147483647 - sec);
+    const leap = (p.y%4===0 && p.y%100!==0) || p.y%400===0;
+    $('isLeap').textContent = leap ? 'Yes — ' + p.y : 'No — ' + p.y;
+
+    // ---- Convert card reflects live value ----
+    updateConvert(msSinceEpoch/1000);
+
+    // ---- Units toggle display ----
+    if (showMsUnits){
+      $('fraction').textContent = "· " + fracMs + " ms";
+    }
+
+    // requestAnimationFrame via rAF-ish; use ~60ms
+    setTimeout(tick, mode==="run" ? 60 : 1000);
+  }
+
+  function ctile(num, lbl){
+    return `<div class="ctile"><div class="num">${num!==''?fmt(num):'–'}</div><div class="lbl">${lbl}</div></div>`;
+  }
+
+  // ---- Convert logic ----
+  function updateConvert(secFloat){
+    const sec = Math.floor(secFloat);
+    const ms = Math.round(secFloat*1000);
+    const d = new Date(sec*1000);
+    const p = utcParts(sec*1000);
+    $('cSec').textContent = fmt(sec);
+    $('cMs').textContent = fmt(ms);
+    $('cUtc').textContent = MON[p.mo-1]+' '+p.da+', '+p.y+' '+pad(p.h,2)+':'+pad(p.mi,2)+':'+pad(p.s,2)+' UTC';
+    $('cLoc').textContent = d.toLocaleString();
+    $('cIso').textContent = d.toISOString();
+    $('cDow').textContent = DOW[p.dow];
+  }
+  function doConvert(){
+    const v = parseFloat($('convInput').value);
+    if (!isNaN(v)) updateConvert(v);
+  }
+
+  // ---- Timezone label ----
+  function initTZ(){
+    let tz;
+    try { tz = Intl.DateTimeFormat().localeOptions ? 'UTC' : 'UTC'; } catch(e){ tz='UTC'; }
+    try {
+      tz = Intl.supportedValuesOf ? Intl.supportedValuesOf('timeZone')[0] : 'UTC';
+      // use a reliable named zone
+      tz = new Intl.DateTimeFormat(undefined,{timeZone:'UTC',timeZoneName:'shortOffset'}).formatToParts(new Date());
+    } catch(e){}
+    let name = 'UTC';
+    try {
+      name = new Intl.DateTimeFormat(undefined,{timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone}).formatToParts(new Date()).find(p=>p.type==='timeZoneName').value;
+    } catch(e){}
+    $('tzLabel').textContent = 'timezone: ' + new Intl.DateTimeFormat().resolvedOptions().timeZone + ' (' + name + ')';
+    $('tzLabel2').textContent = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+  }
+
+  // ---- Controls ----
+  $('btnRun').onclick = () => {
+    if (mode === "run") return;
+    mode = "run";
+    $('btnRun').classList.add('active');
+    $('btnPause').classList.remove('active');
+    tick();
+  };
+  $('btnPause').onclick = () => {
+    if (mode === "pause") return;
+    mode = "pause";
+    pausedAt = nowMs();
+    $('btnPause').classList.add('active');
+    $('btnRun').classList.remove('active');
+    tick();
+  };
+  $('btnMs').onclick = (e) => {
+    showMsUnits = !showMsUnits;
+    e.currentTarget.classList.toggle('active', showMsUnits);
+    e.currentTarget.textContent = showMsUnits ? 'Units: ms+sec' : 'Units: seconds';
+  };
+  $('btnComma').onclick = (e) => {
+    useComma = !useComma;
+    e.currentTarget.classList.toggle('active', useComma);
+    e.currentTarget.textContent = useComma ? 'Formatting: commas' : 'Formatting: digits';
+  };
+  // Single click: snap back to real "now". Double-click: jump to Y2K38.
+  $('btnReset').onclick = () => {
+    userOffset = 0;
+    mode = "run";
+    $('btnRun').classList.add('active');
+    $('btnPause').classList.remove('active');
+    tick();
+  };
+  $('btnReset').addEventListener('dblclick', () => {
+    userOffset = (2147483647 * 1000) - Date.now();
+    mode = "run";
+    $('btnRun').classList.add('active');
+    $('btnPause').classList.remove('active');
+    tick();
+  });
+  $('convBtn').onclick = doConvert;
+  $('convInput').addEventListener('keydown', e => { if (e.key==='Enter') doConvert(); });
+
+  // init
+  initTZ();
+  tick();
+})();
+</script>
+</body>
+</html>
